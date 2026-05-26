@@ -181,16 +181,15 @@ async fn update_environment_record(
     dynamo_client
         .update_item()
         .table_name(table_name)
-        .key(
-            "environment", // Partition key attribute name
-            AttributeValue::S(environment_id.to_string()),
-        )
-        .update_expression("set host_bucket_domain = :hostBucketDomain")
+        // 1. Corrección del .key() usando pares clave-valor
+        .key("environment", AttributeValue::S(environment_id.to_string()))
+        // 2. Unificación en un solo SET para Strings
+        .update_expression("SET host_bucket_domain = :hostBucketDomain, recipes_bucket_domain = :recipesBucketDomain")
+        // 3. Unificación de los attribute values
         .expression_attribute_values(
             ":hostBucketDomain",
             AttributeValue::S(host_bucket_domain.to_string()),
         )
-        .update_expression("set recipes_bucket_domain = :recipesBucketDomain")
         .expression_attribute_values(
             ":recipesBucketDomain",
             AttributeValue::S(recipes_bucket_domain.to_string()),
