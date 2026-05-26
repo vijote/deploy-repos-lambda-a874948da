@@ -1,7 +1,10 @@
+use aws_config::BehaviorVersion;
 use lambda_runtime::{Error, LambdaEvent};
 use aws_lambda_events::event::eventbridge::EventBridgeEvent;
 use std::{collections::HashMap, env};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT, ACCEPT};
+use aws_sdk_dynamodb::{Client as DynamoClient};
+use aws_sdk_dynamodb::types::AttributeValue;
 use serde::{Serialize, Deserialize};
 use serde_json::json;
 
@@ -13,6 +16,7 @@ pub(crate) struct CustomEvent {
     recipes_bucket_name: String,
     host_bucket_name: String,
     users_task_family_name: String,
+    environment_id: String,
     recipes_task_family_name: String,
     recipes_service: String,
     users_service: String,
@@ -56,6 +60,9 @@ pub(crate)async fn function_handler(event: LambdaEvent<EventBridgeEvent<CustomEv
     let mut tareas = vec![];
 
     let mut github_updates: RepoEnvMap = HashMap::new();
+
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let dynamo_client = DynamoClient::new(&config);
 
     let mut recipes_mf_vars = HashMap::new();
     recipes_mf_vars.insert("AWS_GITHUB_S3_ROLE_NAME".to_string(), event.payload.detail.s3_role_name.clone());
@@ -106,6 +113,17 @@ pub(crate)async fn function_handler(event: LambdaEvent<EventBridgeEvent<CustomEv
         return Err(Error::from(format!("Fallaron algunas integraciones: {:?}", errores)));
     }
 
+    let table_name = env::var("TABLE_NAME")
+        .expect("La variable de entorno TABLE_NAME no está configurada");
+
+    update_environment_record(
+        &dynamo_client,
+        &table_name,
+        &event.payload.detail.environment_id,
+        &event.payload.detail.host_bucket_name,
+        &event.payload.detail.recipes_bucket_name
+    ).await;
+
     Ok(serde_json::json!({
         "status": "success",
         "processed_repos_count": 4
@@ -151,4 +169,35 @@ async fn process_repo(
     }
 
     Ok(())
+}
+
+async fn update_environment_record(
+    dynamo_client: &DynamoClient,
+    table_name: &str,
+    environment_id: &str,
+    host_bucket_domain: &str,
+    recipes_bucket_domain: &str,
+) {
+    dynamo_client
+        .update_item()
+        .table_name(table_name)
+        .key(
+            "environment", // Partition key attribute name
+            AttributeValue::S(environment_id.to_string()),
+        )
+        .update_expression("set host_bucket_domain = :hostBucketDomain")
+        .expression_attribute_values(
+            ":hostBucketDomain",
+            AttributeValue::S(host_bucket_domain.to_string()),
+        )
+        .update_expression("set recipes_bucket_domain = :recipesBucketDomain")
+        .expression_attribute_values(
+            ":recipesBucketDomain",
+            AttributeValue::S(recipes_bucket_domain.to_string()),
+        )
+        .send()
+        .await
+        .expect("Error al actualizar!!");
+
+    ()
 }
