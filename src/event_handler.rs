@@ -95,6 +95,22 @@ pub(crate)async fn function_handler(event: LambdaEvent<EventBridgeEvent<CustomEv
             process_repo(client_clone, owner, repo, github_variables_clone).await
         });
         tareas.push(tarea);
+
+        // Paso B: Disparar Workflow Dispatch
+        let dispatch_url = format!(
+            "https://api.github.com/repos/{}/{}/actions/workflows/deploy.yml/dispatches", 
+            owner, repo
+        );
+
+        let dispatch_body = WorkflowDispatchBody {
+            r#ref: "main".to_string(),
+        };
+
+        let res_dispatch = client.post(&dispatch_url).json(&dispatch_body).send().await?;
+        if !res_dispatch.status().is_success() {
+            let err_text = res_dispatch.text().await.unwrap_or_default();
+            return Err(Error::from(format!("Error dispatch [{}]: {}", repo, err_text)));
+        }
     }
 
     // 4. Esperar resultados y recolectar errores
@@ -148,24 +164,6 @@ async fn process_repo(
             let err_text = res_var.text().await.unwrap_or_default();
             return Err(Error::from(format!("Fallo al setear variable en {}: {}", repo, err_text)));
         }
-    }
-    
-
-
-    // Paso B: Disparar Workflow Dispatch
-    let dispatch_url = format!(
-        "https://api.github.com/repos/{}/{}/actions/workflows/deploy.yml/dispatches", 
-        owner, repo
-    );
-
-    let dispatch_body = WorkflowDispatchBody {
-        r#ref: "main".to_string(),
-    };
-
-    let res_dispatch = client.post(&dispatch_url).json(&dispatch_body).send().await?;
-    if !res_dispatch.status().is_success() {
-        let err_text = res_dispatch.text().await.unwrap_or_default();
-        return Err(Error::from(format!("Error dispatch [{}]: {}", repo, err_text)));
     }
 
     Ok(())
